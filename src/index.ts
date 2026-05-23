@@ -33,6 +33,7 @@ type CommandInteraction = {
     }>;
   };
   member?: {
+    id?: bigint;
     roles: bigint[];
   };
   user?: {
@@ -76,6 +77,10 @@ function getFocusedOptionValue(interaction: CommandInteraction): string {
 function userCanNotify(interaction: CommandInteraction): boolean {
   const memberRoles = interaction.member?.roles ?? [];
   return memberRoles.includes(config.notifierRoleId);
+}
+
+function getInteractionUserId(interaction: CommandInteraction): bigint | undefined {
+  return interaction.user?.id ?? interaction.member?.id;
 }
 
 function getCooldownRemaining(userId: bigint): number {
@@ -274,12 +279,9 @@ const bot = createBot({
             getFocusedOptionValue(interaction),
           );
 
-          await bot.helpers.sendInteractionResponse(interaction.id, interaction.token, {
-            type: InteractionResponseTypes.ApplicationCommandAutocompleteResult,
-            data: {
-              choices: matches,
-            },
-          } as any);
+          await interaction.respond({
+            choices: matches,
+          });
           return;
         }
 
@@ -292,7 +294,7 @@ const bot = createBot({
           return;
         }
 
-        const userId = interaction.user?.id;
+        const userId = getInteractionUserId(interaction);
         if (userId === undefined) {
           await safelyRespond(interaction, "I couldn't figure out who ran that command.");
           return;
@@ -332,6 +334,8 @@ const bot = createBot({
           return;
         }
 
+        await safelyRespond(interaction, `Sending ping for ${post.name}...`);
+
         const role = await ensurePostRole(bot, post);
 
         await bot.helpers.sendMessage(post.id, {
@@ -339,8 +343,6 @@ const bot = createBot({
         });
 
         setCooldown(userId);
-
-        await safelyRespond(interaction, `Pinged ${post.name}.`);
       } catch (error) {
         console.error("interactionCreate failed:", error);
 
