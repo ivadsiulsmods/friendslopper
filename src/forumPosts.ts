@@ -227,7 +227,13 @@ export async function syncAllPostRoles(bot: DiscordBot): Promise<void> {
   const posts = await getTrackedForumPosts(bot);
 
   for (const post of posts) {
-    await syncPostRoleMembers(bot, post);
+    await ensurePostRole(bot, post);
+
+    try {
+      await syncPostRoleMembers(bot, post);
+    } catch (error) {
+      console.warn(`Skipping startup reaction sync for ${post.name}:`, error);
+    }
   }
 }
 
@@ -252,12 +258,12 @@ export async function syncPostRoleForMessage(
 export async function addRoleForReaction(
   bot: DiscordBot,
   channelId: bigint,
-  messageId: bigint,
+  _messageId: bigint,
   userId: bigint,
 ): Promise<void> {
   const post = await getTrackedForumPostById(bot, channelId);
 
-  if (post === null || post.starterMessageId !== messageId) {
+  if (post === null) {
     return;
   }
 
@@ -275,12 +281,12 @@ export async function addRoleForReaction(
 export async function removeRoleForReaction(
   bot: DiscordBot,
   channelId: bigint,
-  messageId: bigint,
+  _messageId: bigint,
   userId: bigint,
 ): Promise<void> {
   const post = await getTrackedForumPostById(bot, channelId);
 
-  if (post === null || post.starterMessageId !== messageId) {
+  if (post === null) {
     return;
   }
 
