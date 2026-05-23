@@ -1,3 +1,4 @@
+import { createServer } from "node:http";
 import {
   ApplicationCommandOptionTypes,
   createBot,
@@ -113,6 +114,23 @@ const notifyCommand = {
     },
   ],
 };
+
+const port = Number.parseInt(process.env.PORT ?? "3000", 10);
+
+if (Number.isNaN(port) === true || port <= 0) {
+  throw new Error("PORT must be a valid positive number.");
+}
+
+const server = createServer((request, response) => {
+  if (request.url === "/health") {
+    response.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+    response.end("OK");
+    return;
+  }
+
+  response.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+  response.end("Not Found");
+});
 
 const bot = createBot({
   token: config.token,
@@ -305,10 +323,58 @@ const bot = createBot({
   },
 });
 
+let isShuttingDown = false;
+
+async function shutdown(signal: string): Promise<void> {
+  if (isShuttingDown === true) {
+    return;
+  }
+
+  isShuttingDown = true;
+  console.log(`Received ${signal}, shutting down...`);
+
+  const forceExitTimeout = setTimeout(() => {
+    console.error("Graceful shutdown timed out.");
+    process.exit(1);
+  }, 10_000);
+
+  forceExitTimeout.unref();
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      });
+    });
+
+    await Promise.resolve(bot.shutdown?.());
+    process.exit(0);
+  } catch (error) {
+    console.error("Shutdown failed:", error);
+    process.exit(1);
+  }
+}
+
+server.on("error", (error) => {
+  console.error("HTTP server failed:", error);
+  process.exit(1);
+});
+
 process.on("SIGINT", () => {
-  console.log("Shutting down...");
-  bot.shutdown?.();
-  process.exit(0);
+  void shutdown("SIGINT");
+});
+
+process.on("SIGTERM", () => {
+  void shutdown("SIGTERM");
+});
+
+server.listen(port, "0.0.0.0", () => {
+  console.log(`Health server listening on 0.0.0.0:${port}`);
 });
 
 bot.start();
