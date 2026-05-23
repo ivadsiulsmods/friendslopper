@@ -7,6 +7,8 @@ export interface ForumPostRecord {
   starterMessageId: bigint;
 }
 
+const starterMessageIds = new Map<bigint, bigint>();
+
 type DiscordBot = Bot<any>;
 type ForumChannelLike = {
   id?: bigint | string;
@@ -52,19 +54,48 @@ function getRoleName(postName: string): string {
 }
 
 export async function getTrackedForumPosts(
-  _bot: DiscordBot,
+  bot: DiscordBot,
 ): Promise<ForumPostRecord[]> {
-  return config.trackedPosts
-    .map((post) => ({
+  const posts = await Promise.all(
+    config.trackedPosts.map(async (post) => ({
       id: post.id,
       name: post.name,
-      // Forum starter messages use the post starter message; for these static
-      // posts we treat the supplied post ID as the starter message ID too.
-      starterMessageId: post.id,
-    }))
+      starterMessageId: await getStarterMessageId(bot, post.id),
+    })),
+  );
+
+  return posts
     .sort((left, right) =>
     left.name.localeCompare(right.name),
     );
+}
+
+async function getStarterMessageId(
+  bot: DiscordBot,
+  postId: bigint,
+): Promise<bigint> {
+  const cachedStarterMessageId = starterMessageIds.get(postId);
+
+  if (cachedStarterMessageId !== undefined) {
+    return cachedStarterMessageId;
+  }
+
+  try {
+    const channel = (await bot.helpers.getChannel(postId)) as {
+      messageId?: bigint | string;
+    };
+
+    if (channel.messageId !== undefined) {
+      const starterMessageId = toBigInt(channel.messageId);
+      starterMessageIds.set(postId, starterMessageId);
+      return starterMessageId;
+    }
+  } catch (error) {
+    console.warn(`Failed to resolve starter message for ${postId}:`, error);
+  }
+
+  starterMessageIds.set(postId, postId);
+  return postId;
 }
 
 export async function getTrackedForumPostById(
@@ -258,12 +289,12 @@ export async function syncPostRoleForMessage(
 export async function addRoleForReaction(
   bot: DiscordBot,
   channelId: bigint,
-  _messageId: bigint,
+  messageId: bigint,
   userId: bigint,
 ): Promise<void> {
   const post = await getTrackedForumPostById(bot, channelId);
 
-  if (post === null) {
+  if (post === null || post.starterMessageId !== messageId) {
     return;
   }
 
@@ -281,12 +312,12 @@ export async function addRoleForReaction(
 export async function removeRoleForReaction(
   bot: DiscordBot,
   channelId: bigint,
-  _messageId: bigint,
+  messageId: bigint,
   userId: bigint,
 ): Promise<void> {
   const post = await getTrackedForumPostById(bot, channelId);
 
-  if (post === null) {
+  if (post === null || post.starterMessageId !== messageId) {
     return;
   }
 
