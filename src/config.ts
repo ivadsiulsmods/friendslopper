@@ -10,6 +10,7 @@ export const config = {
   forumChannelId: 1507096852976373760n,
   ignoredPostId: 1507519991736438895n,
   notifierRoleId: 1501620031421939814n,
+  adminRoleId: 1331447283904024596n,
   notifyCooldownMs: 5 * 60 * 1000,
   reactionEmoji: "🎮",
   maxAutocompleteResults: 25,

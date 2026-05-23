@@ -79,6 +79,11 @@ function userCanNotify(interaction: CommandInteraction): boolean {
   return memberRoles.includes(config.notifierRoleId);
 }
 
+function userBypassesCooldown(interaction: CommandInteraction): boolean {
+  const memberRoles = interaction.member?.roles ?? [];
+  return memberRoles.includes(config.adminRoleId);
+}
+
 function getInteractionUserId(interaction: CommandInteraction): bigint | undefined {
   return interaction.user?.id ?? interaction.member?.id;
 }
@@ -308,15 +313,17 @@ const bot = createBot({
           return;
         }
 
-        cleanupCooldown(userId);
+        if (userBypassesCooldown(interaction) === false) {
+          cleanupCooldown(userId);
 
-        const remainingCooldown = getCooldownRemaining(userId);
-        if (remainingCooldown > 0) {
-          await safelyRespond(
-            interaction,
-            `You're on cooldown for another ${formatCooldown(remainingCooldown)}.`,
-          );
-          return;
+          const remainingCooldown = getCooldownRemaining(userId);
+          if (remainingCooldown > 0) {
+            await safelyRespond(
+              interaction,
+              `You're on cooldown for another ${formatCooldown(remainingCooldown)}.`,
+            );
+            return;
+          }
         }
 
         const gameOption = getOptionValue(interaction, "game");
@@ -342,7 +349,9 @@ const bot = createBot({
           content: `<@&${role.id}> Heads up for ${post.name}.`,
         });
 
-        setCooldown(userId);
+        if (userBypassesCooldown(interaction) === false) {
+          setCooldown(userId);
+        }
       } catch (error) {
         console.error("interactionCreate failed:", error);
 
