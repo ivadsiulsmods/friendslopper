@@ -20,18 +20,22 @@ export const config = {
     {
       id: 1507752111495053374n,
       name: "PEAK",
+      starterMessageId: 1507752111495053374n,
     },
     {
       id: 1507752025008508958n,
       name: "R.E.P.O",
+      starterMessageId: 1507752025008508958n,
     },
     {
       id: 1507751920763277393n,
       name: "Burglin' Gnomes",
+      starterMessageId: 1507751920763277393n,
     },
     {
       id: 1507751743931547738n,
       name: "Lethal Company",
+      starterMessageId: 1507751743931547738n,
     },
   ],
 } as const;

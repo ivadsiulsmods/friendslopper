@@ -7,15 +7,7 @@ export interface ForumPostRecord {
   starterMessageId: bigint;
 }
 
-const starterMessageIds = new Map<bigint, bigint>();
-
 type DiscordBot = Bot<any>;
-type ForumChannelLike = {
-  id?: bigint | string;
-  parentId?: bigint | string;
-  name?: string;
-  messageId?: bigint | string;
-};
 type GuildMemberLike = {
   id: bigint;
   roles: bigint[];
@@ -33,18 +25,6 @@ function toBigInt(value: bigint | string): bigint {
   return BigInt(value);
 }
 
-function isTrackedForumPost(channel: ForumChannelLike): channel is Required<ForumChannelLike> {
-  return (
-    channel.id !== undefined &&
-    channel.parentId !== undefined &&
-    toBigInt(channel.parentId) === config.forumChannelId &&
-    toBigInt(channel.id) !== config.ignoredPostId &&
-    typeof channel.name === "string" &&
-    channel.name.length > 0 &&
-    channel.messageId !== undefined
-  );
-}
-
 function getRoleName(postName: string): string {
   const normalizedName = postName.trim().toUpperCase();
   const availableLength =
@@ -54,48 +34,17 @@ function getRoleName(postName: string): string {
 }
 
 export async function getTrackedForumPosts(
-  bot: DiscordBot,
+  _bot: DiscordBot,
 ): Promise<ForumPostRecord[]> {
-  const posts = await Promise.all(
-    config.trackedPosts.map(async (post) => ({
+  return config.trackedPosts
+    .map((post) => ({
       id: post.id,
       name: post.name,
-      starterMessageId: await getStarterMessageId(bot, post.id),
-    })),
-  );
-
-  return posts
+      starterMessageId: post.starterMessageId,
+    }))
     .sort((left, right) =>
     left.name.localeCompare(right.name),
     );
-}
-
-async function getStarterMessageId(
-  bot: DiscordBot,
-  postId: bigint,
-): Promise<bigint> {
-  const cachedStarterMessageId = starterMessageIds.get(postId);
-
-  if (cachedStarterMessageId !== undefined) {
-    return cachedStarterMessageId;
-  }
-
-  try {
-    const channel = (await bot.helpers.getChannel(postId)) as {
-      messageId?: bigint | string;
-    };
-
-    if (channel.messageId !== undefined) {
-      const starterMessageId = toBigInt(channel.messageId);
-      starterMessageIds.set(postId, starterMessageId);
-      return starterMessageId;
-    }
-  } catch (error) {
-    console.warn(`Failed to resolve starter message for ${postId}:`, error);
-  }
-
-  starterMessageIds.set(postId, postId);
-  return postId;
 }
 
 export async function getTrackedForumPostById(
@@ -210,20 +159,38 @@ async function getReactedUserIds(
   bot: DiscordBot,
   post: ForumPostRecord,
 ): Promise<Set<bigint>> {
-  const users = (await bot.helpers.getReactions(
-    post.id,
-    post.starterMessageId,
-    config.reactionEmoji,
-  )) as Array<{ id: bigint; bot?: boolean }>;
-
   const reactedUserIds = new Set<bigint>();
+  let after: string | undefined;
 
-  for (const user of users) {
-    if (user.bot === true) {
-      continue;
+  while (true) {
+    const users = (await bot.helpers.getReactions(
+      post.id,
+      post.starterMessageId,
+      config.reactionEmoji,
+      {
+        after,
+        limit: 100,
+        type: 0,
+      },
+    )) as Array<{ id: bigint; bot?: boolean }>;
+
+    if (users.length === 0) {
+      break;
     }
 
-    reactedUserIds.add(user.id);
+    for (const user of users) {
+      if (user.bot === true) {
+        continue;
+      }
+
+      reactedUserIds.add(user.id);
+    }
+
+    if (users.length < 100) {
+      break;
+    }
+
+    after = users[users.length - 1]!.id.toString();
   }
 
   return reactedUserIds;
