@@ -45,6 +45,11 @@ type CommandInteraction = {
   ) => Promise<unknown>;
 };
 
+type RawGatewayPayload = {
+  t?: string;
+  d?: Record<string, unknown>;
+};
+
 const notifyCooldowns = new Map<bigint, number>();
 
 function getOptionValue(
@@ -122,6 +127,34 @@ async function safelyRespond(
   } catch (error) {
     console.error("Failed to respond to interaction:", error);
   }
+}
+
+function getBigIntField(
+  payload: Record<string, unknown>,
+  key: string,
+): bigint | undefined {
+  const value = payload[key];
+
+  if (typeof value === "bigint") {
+    return value;
+  }
+
+  if (typeof value === "string" && value.length > 0) {
+    return BigInt(value);
+  }
+
+  return undefined;
+}
+
+function getEmojiNameField(payload: Record<string, unknown>): string | undefined {
+  const emoji = payload.emoji;
+
+  if (typeof emoji !== "object" || emoji === null) {
+    return undefined;
+  }
+
+  const name = (emoji as { name?: unknown }).name;
+  return typeof name === "string" ? name : undefined;
 }
 
 const notifyCommand = {
@@ -207,65 +240,61 @@ const bot = createBot({
       }
     },
 
-    async reactionAdd(payload) {
+    async raw(data) {
+      const payload = data as RawGatewayPayload;
+
       try {
-        if (shouldProcessReactionPayload(payload as any) === false) {
+        if (payload.t === undefined || payload.d === undefined) {
           return;
         }
 
-        await addRoleForReaction(
-          bot,
-          payload.channelId,
-          payload.messageId,
-          payload.userId,
-        );
+        if (
+          payload.t !== "MESSAGE_REACTION_ADD" &&
+          payload.t !== "MESSAGE_REACTION_REMOVE" &&
+          payload.t !== "MESSAGE_REACTION_REMOVE_ALL" &&
+          payload.t !== "MESSAGE_REACTION_REMOVE_EMOJI"
+        ) {
+          return;
+        }
+
+        const guildId = getBigIntField(payload.d, "guild_id");
+        const channelId = getBigIntField(payload.d, "channel_id");
+        const messageId = getBigIntField(payload.d, "message_id");
+
+        if (guildId !== config.guildId || channelId === undefined || messageId === undefined) {
+          return;
+        }
+
+        if (payload.t === "MESSAGE_REACTION_REMOVE_ALL") {
+          await syncPostRoleForMessage(bot, channelId, messageId);
+          return;
+        }
+
+        const emojiName = getEmojiNameField(payload.d);
+        if (emojiName !== config.reactionEmoji) {
+          return;
+        }
+
+        if (payload.t === "MESSAGE_REACTION_REMOVE_EMOJI") {
+          await syncPostRoleForMessage(bot, channelId, messageId);
+          return;
+        }
+
+        const userId = getBigIntField(payload.d, "user_id");
+        if (userId === undefined) {
+          return;
+        }
+
+        if (payload.t === "MESSAGE_REACTION_ADD") {
+          await addRoleForReaction(bot, channelId, messageId, userId);
+          return;
+        }
+
+        if (payload.t === "MESSAGE_REACTION_REMOVE") {
+          await removeRoleForReaction(bot, channelId, messageId, userId);
+        }
       } catch (error) {
-        console.error("reactionAdd failed:", error);
-      }
-    },
-
-    async reactionRemove(payload) {
-      try {
-        if (shouldProcessReactionPayload(payload as any) === false) {
-          return;
-        }
-
-        await removeRoleForReaction(
-          bot,
-          payload.channelId,
-          payload.messageId,
-          payload.userId,
-        );
-      } catch (error) {
-        console.error("reactionRemove failed:", error);
-      }
-    },
-
-    async reactionRemoveEmoji(payload) {
-      try {
-        if (payload.guildId !== config.guildId) {
-          return;
-        }
-
-        if ((payload.emoji as any).name !== config.reactionEmoji) {
-          return;
-        }
-
-        await syncPostRoleForMessage(bot, payload.channelId, payload.messageId);
-      } catch (error) {
-        console.error("reactionRemoveEmoji failed:", error);
-      }
-    },
-
-    async reactionRemoveAll(payload) {
-      try {
-        if (payload.guildId !== config.guildId) {
-          return;
-        }
-
-        await syncPostRoleForMessage(bot, payload.channelId, payload.messageId);
-      } catch (error) {
-        console.error("reactionRemoveAll failed:", error);
+        console.error("raw reaction event failed:", error);
       }
     },
 
