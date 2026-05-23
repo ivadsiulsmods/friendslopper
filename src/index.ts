@@ -1,0 +1,314 @@
+import {
+  ApplicationCommandOptionTypes,
+  createBot,
+  Intents,
+  InteractionResponseTypes,
+  InteractionTypes,
+} from "discordeno";
+import { config, formatCooldown } from "./config.js";
+import {
+  addRoleForReaction,
+  ensurePostRole,
+  getAutocompleteMatches,
+  getTrackedForumPostByName,
+  getTrackedForumPosts,
+  removeRoleForReaction,
+  shouldProcessReactionPayload,
+  syncAllPostRoles,
+  syncPostRoleForMessage,
+} from "./forumPosts.js";
+
+type CommandInteraction = {
+  id: bigint;
+  token: string;
+  type: number;
+  guildId?: bigint;
+  data?: {
+    name?: string;
+    options?: Array<{
+      name: string;
+      value?: string | number | boolean;
+      focused?: boolean;
+    }>;
+  };
+  member?: {
+    roles: bigint[];
+  };
+  user?: {
+    id: bigint;
+  };
+  respond: (
+    response: string | Record<string, unknown>,
+    options?: { isPrivate?: boolean; withResponse?: boolean },
+  ) => Promise<unknown>;
+};
+
+const notifyCooldowns = new Map<bigint, number>();
+
+function getOptionValue(
+  interaction: CommandInteraction,
+  optionName: string,
+): string | number | boolean | undefined {
+  const options = interaction.data?.options ?? [];
+
+  for (const option of options) {
+    if (option.name === optionName) {
+      return option.value;
+    }
+  }
+
+  return undefined;
+}
+
+function getFocusedOptionValue(interaction: CommandInteraction): string {
+  const options = interaction.data?.options ?? [];
+
+  for (const option of options) {
+    if (option.focused === true && typeof option.value === "string") {
+      return option.value;
+    }
+  }
+
+  return "";
+}
+
+function userCanNotify(interaction: CommandInteraction): boolean {
+  const memberRoles = interaction.member?.roles ?? [];
+  return memberRoles.includes(config.notifierRoleId);
+}
+
+function getCooldownRemaining(userId: bigint): number {
+  const lastNotifyAt = notifyCooldowns.get(userId);
+
+  if (lastNotifyAt === undefined) {
+    return 0;
+  }
+
+  const expiresAt = lastNotifyAt + config.notifyCooldownMs;
+  return Math.max(0, expiresAt - Date.now());
+}
+
+function setCooldown(userId: bigint): void {
+  notifyCooldowns.set(userId, Date.now());
+}
+
+function cleanupCooldown(userId: bigint): void {
+  const remaining = getCooldownRemaining(userId);
+
+  if (remaining === 0) {
+    notifyCooldowns.delete(userId);
+  }
+}
+
+const notifyCommand = {
+  name: "notify",
+  description: "Ping the opt-in role for a forum game post.",
+  options: [
+    {
+      type: ApplicationCommandOptionTypes.String,
+      name: "game",
+      description: "The forum post to notify.",
+      autocomplete: true,
+      required: true,
+    },
+  ],
+};
+
+const bot = createBot({
+  token: config.token,
+  intents:
+    Intents.Guilds |
+    Intents.GuildMembers |
+    Intents.GuildMessages |
+    Intents.GuildMessageReactions,
+  desiredProperties: {
+    channel: {
+      id: true,
+      parentId: true,
+      name: true,
+      messageId: true,
+    },
+    interaction: {
+      id: true,
+      token: true,
+      type: true,
+      guildId: true,
+      data: true,
+      member: true,
+      user: true,
+    },
+    member: {
+      id: true,
+      roles: true,
+      guildId: true,
+    },
+    role: {
+      id: true,
+      name: true,
+    },
+    user: {
+      id: true,
+      bot: true,
+    },
+  },
+  events: {
+    async ready(_, rawPayload) {
+      console.log(`Connected to ${rawPayload.guilds.length} guild(s)!`);
+
+      try {
+        await bot.helpers.upsertGuildApplicationCommands(config.guildId, [
+          notifyCommand,
+        ]);
+        await syncAllPostRoles(bot);
+        console.log("Friendslopper is ready.");
+      } catch (error) {
+        console.error("Startup sync failed:", error);
+      }
+    },
+
+    async reactionAdd(payload) {
+      if (shouldProcessReactionPayload(payload as any) === false) {
+        return;
+      }
+
+      await addRoleForReaction(
+        bot,
+        payload.channelId,
+        payload.messageId,
+        payload.userId,
+      );
+    },
+
+    async reactionRemove(payload) {
+      if (shouldProcessReactionPayload(payload as any) === false) {
+        return;
+      }
+
+      await removeRoleForReaction(
+        bot,
+        payload.channelId,
+        payload.messageId,
+        payload.userId,
+      );
+    },
+
+    async reactionRemoveEmoji(payload) {
+      if (payload.guildId !== config.guildId) {
+        return;
+      }
+
+      if ((payload.emoji as any).name !== config.reactionEmoji) {
+        return;
+      }
+
+      await syncPostRoleForMessage(bot, payload.channelId, payload.messageId);
+    },
+
+    async reactionRemoveAll(payload) {
+      if (payload.guildId !== config.guildId) {
+        return;
+      }
+
+      await syncPostRoleForMessage(bot, payload.channelId, payload.messageId);
+    },
+
+    async interactionCreate(rawInteraction) {
+      const interaction = rawInteraction as unknown as CommandInteraction;
+
+      if (interaction.data?.name !== "notify") {
+        return;
+      }
+
+      if (interaction.type === InteractionTypes.ApplicationCommandAutocomplete) {
+        const posts = await getTrackedForumPosts(bot);
+        const matches = getAutocompleteMatches(
+          posts,
+          getFocusedOptionValue(interaction),
+        );
+
+        await bot.helpers.sendInteractionResponse(interaction.id, interaction.token, {
+          type: InteractionResponseTypes.ApplicationCommandAutocompleteResult,
+          data: {
+            choices: matches,
+          },
+        } as any);
+        return;
+      }
+
+      if (interaction.type !== InteractionTypes.ApplicationCommand) {
+        return;
+      }
+
+      if (interaction.guildId !== config.guildId) {
+        await interaction.respond("This command only works in the target guild.", {
+          isPrivate: true,
+        });
+        return;
+      }
+
+      const userId = interaction.user?.id;
+      if (userId === undefined) {
+        await interaction.respond("I couldn't figure out who ran that command.", {
+          isPrivate: true,
+        });
+        return;
+      }
+
+      if (userCanNotify(interaction) === false) {
+        await interaction.respond(
+          "You need the configured notifier role to use `/notify`.",
+          { isPrivate: true },
+        );
+        return;
+      }
+
+      cleanupCooldown(userId);
+
+      const remainingCooldown = getCooldownRemaining(userId);
+      if (remainingCooldown > 0) {
+        await interaction.respond(
+          `You're on cooldown for another ${formatCooldown(remainingCooldown)}.`,
+          { isPrivate: true },
+        );
+        return;
+      }
+
+      const gameOption = getOptionValue(interaction, "game");
+      if (typeof gameOption !== "string" || gameOption.trim().length === 0) {
+        await interaction.respond("Pick a game post first.", {
+          isPrivate: true,
+        });
+        return;
+      }
+
+      const post = await getTrackedForumPostByName(bot, gameOption);
+      if (post === null) {
+        await interaction.respond(
+          "I couldn't find that forum post. Use the autocomplete suggestions.",
+          { isPrivate: true },
+        );
+        return;
+      }
+
+      const role = await ensurePostRole(bot, post);
+
+      await bot.helpers.sendMessage(post.id, {
+        content: `<@&${role.id}> Heads up for ${post.name}.`,
+      });
+
+      setCooldown(userId);
+
+      await interaction.respond(`Pinged ${post.name}.`, {
+        isPrivate: true,
+      });
+    },
+  },
+});
+
+process.on("SIGINT", () => {
+  console.log("Shutting down...");
+  bot.shutdown?.();
+  process.exit(0);
+});
+
+bot.start();
