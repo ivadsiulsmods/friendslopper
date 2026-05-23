@@ -101,6 +101,19 @@ function cleanupCooldown(userId: bigint): void {
   }
 }
 
+async function safelyRespond(
+  interaction: CommandInteraction,
+  content: string,
+): Promise<void> {
+  try {
+    await interaction.respond(content, {
+      isPrivate: true,
+    });
+  } catch (error) {
+    console.error("Failed to respond to interaction:", error);
+  }
+}
+
 const notifyCommand = {
   name: "notify",
   description: "Ping the opt-in role for a forum game post.",
@@ -185,140 +198,159 @@ const bot = createBot({
     },
 
     async reactionAdd(payload) {
-      if (shouldProcessReactionPayload(payload as any) === false) {
-        return;
-      }
+      try {
+        if (shouldProcessReactionPayload(payload as any) === false) {
+          return;
+        }
 
-      await addRoleForReaction(
-        bot,
-        payload.channelId,
-        payload.messageId,
-        payload.userId,
-      );
+        await addRoleForReaction(
+          bot,
+          payload.channelId,
+          payload.messageId,
+          payload.userId,
+        );
+      } catch (error) {
+        console.error("reactionAdd failed:", error);
+      }
     },
 
     async reactionRemove(payload) {
-      if (shouldProcessReactionPayload(payload as any) === false) {
-        return;
-      }
+      try {
+        if (shouldProcessReactionPayload(payload as any) === false) {
+          return;
+        }
 
-      await removeRoleForReaction(
-        bot,
-        payload.channelId,
-        payload.messageId,
-        payload.userId,
-      );
+        await removeRoleForReaction(
+          bot,
+          payload.channelId,
+          payload.messageId,
+          payload.userId,
+        );
+      } catch (error) {
+        console.error("reactionRemove failed:", error);
+      }
     },
 
     async reactionRemoveEmoji(payload) {
-      if (payload.guildId !== config.guildId) {
-        return;
-      }
+      try {
+        if (payload.guildId !== config.guildId) {
+          return;
+        }
 
-      if ((payload.emoji as any).name !== config.reactionEmoji) {
-        return;
-      }
+        if ((payload.emoji as any).name !== config.reactionEmoji) {
+          return;
+        }
 
-      await syncPostRoleForMessage(bot, payload.channelId, payload.messageId);
+        await syncPostRoleForMessage(bot, payload.channelId, payload.messageId);
+      } catch (error) {
+        console.error("reactionRemoveEmoji failed:", error);
+      }
     },
 
     async reactionRemoveAll(payload) {
-      if (payload.guildId !== config.guildId) {
-        return;
-      }
+      try {
+        if (payload.guildId !== config.guildId) {
+          return;
+        }
 
-      await syncPostRoleForMessage(bot, payload.channelId, payload.messageId);
+        await syncPostRoleForMessage(bot, payload.channelId, payload.messageId);
+      } catch (error) {
+        console.error("reactionRemoveAll failed:", error);
+      }
     },
 
     async interactionCreate(rawInteraction) {
       const interaction = rawInteraction as unknown as CommandInteraction;
 
-      if (interaction.data?.name !== "notify") {
-        return;
-      }
+      try {
+        if (interaction.data?.name !== "notify") {
+          return;
+        }
 
-      if (interaction.type === InteractionTypes.ApplicationCommandAutocomplete) {
-        const posts = await getTrackedForumPosts(bot);
-        const matches = getAutocompleteMatches(
-          posts,
-          getFocusedOptionValue(interaction),
-        );
+        if (interaction.type === InteractionTypes.ApplicationCommandAutocomplete) {
+          const posts = await getTrackedForumPosts(bot);
+          const matches = getAutocompleteMatches(
+            posts,
+            getFocusedOptionValue(interaction),
+          );
 
-        await bot.helpers.sendInteractionResponse(interaction.id, interaction.token, {
-          type: InteractionResponseTypes.ApplicationCommandAutocompleteResult,
-          data: {
-            choices: matches,
-          },
-        } as any);
-        return;
-      }
+          await bot.helpers.sendInteractionResponse(interaction.id, interaction.token, {
+            type: InteractionResponseTypes.ApplicationCommandAutocompleteResult,
+            data: {
+              choices: matches,
+            },
+          } as any);
+          return;
+        }
 
-      if (interaction.type !== InteractionTypes.ApplicationCommand) {
-        return;
-      }
+        if (interaction.type !== InteractionTypes.ApplicationCommand) {
+          return;
+        }
 
-      if (interaction.guildId !== config.guildId) {
-        await interaction.respond("This command only works in the target guild.", {
-          isPrivate: true,
+        if (interaction.guildId !== config.guildId) {
+          await safelyRespond(interaction, "This command only works in the target guild.");
+          return;
+        }
+
+        const userId = interaction.user?.id;
+        if (userId === undefined) {
+          await safelyRespond(interaction, "I couldn't figure out who ran that command.");
+          return;
+        }
+
+        if (userCanNotify(interaction) === false) {
+          await safelyRespond(
+            interaction,
+            "You need the configured notifier role to use `/notify`.",
+          );
+          return;
+        }
+
+        cleanupCooldown(userId);
+
+        const remainingCooldown = getCooldownRemaining(userId);
+        if (remainingCooldown > 0) {
+          await safelyRespond(
+            interaction,
+            `You're on cooldown for another ${formatCooldown(remainingCooldown)}.`,
+          );
+          return;
+        }
+
+        const gameOption = getOptionValue(interaction, "game");
+        if (typeof gameOption !== "string" || gameOption.trim().length === 0) {
+          await safelyRespond(interaction, "Pick a game post first.");
+          return;
+        }
+
+        const post = await getTrackedForumPostByName(bot, gameOption);
+        if (post === null) {
+          await safelyRespond(
+            interaction,
+            "I couldn't find that forum post. Use the autocomplete suggestions.",
+          );
+          return;
+        }
+
+        const role = await ensurePostRole(bot, post);
+
+        await bot.helpers.sendMessage(post.id, {
+          content: `<@&${role.id}> Heads up for ${post.name}.`,
         });
-        return;
+
+        setCooldown(userId);
+
+        await safelyRespond(interaction, `Pinged ${post.name}.`);
+      } catch (error) {
+        console.error("interactionCreate failed:", error);
+
+        if (interaction.type === InteractionTypes.ApplicationCommand) {
+          await safelyRespond(
+            interaction,
+            "Something went wrong while handling `/notify`.",
+          );
+        }
       }
-
-      const userId = interaction.user?.id;
-      if (userId === undefined) {
-        await interaction.respond("I couldn't figure out who ran that command.", {
-          isPrivate: true,
-        });
-        return;
-      }
-
-      if (userCanNotify(interaction) === false) {
-        await interaction.respond(
-          "You need the configured notifier role to use `/notify`.",
-          { isPrivate: true },
-        );
-        return;
-      }
-
-      cleanupCooldown(userId);
-
-      const remainingCooldown = getCooldownRemaining(userId);
-      if (remainingCooldown > 0) {
-        await interaction.respond(
-          `You're on cooldown for another ${formatCooldown(remainingCooldown)}.`,
-          { isPrivate: true },
-        );
-        return;
-      }
-
-      const gameOption = getOptionValue(interaction, "game");
-      if (typeof gameOption !== "string" || gameOption.trim().length === 0) {
-        await interaction.respond("Pick a game post first.", {
-          isPrivate: true,
-        });
-        return;
-      }
-
-      const post = await getTrackedForumPostByName(bot, gameOption);
-      if (post === null) {
-        await interaction.respond(
-          "I couldn't find that forum post. Use the autocomplete suggestions.",
-          { isPrivate: true },
-        );
-        return;
-      }
-
-      const role = await ensurePostRole(bot, post);
-
-      await bot.helpers.sendMessage(post.id, {
-        content: `<@&${role.id}> Heads up for ${post.name}.`,
-      });
-
-      setCooldown(userId);
-
-      await interaction.respond(`Pinged ${post.name}.`, {
-        isPrivate: true,
-      });
     },
   },
 });

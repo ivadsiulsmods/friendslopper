@@ -52,23 +52,30 @@ function getRoleName(postName: string): string {
 }
 
 async function getArchivedPosts(bot: DiscordBot): Promise<ForumPostRecord[]> {
-  const archived = await bot.helpers.getPublicArchivedThreads(
-    config.forumChannelId,
-  );
+  try {
+    const archived = await bot.helpers.getPublicArchivedThreads(
+      config.forumChannelId,
+    );
 
-  return (archived.threads as ForumChannelLike[])
-    .filter(isTrackedForumPost)
-    .map((channel) => ({
-      id: toBigInt(channel.id),
-      name: channel.name,
-      starterMessageId: toBigInt(channel.messageId),
-    }));
+    return (archived.threads as ForumChannelLike[])
+      .filter(isTrackedForumPost)
+      .map((channel) => ({
+        id: toBigInt(channel.id),
+        name: channel.name,
+        starterMessageId: toBigInt(channel.messageId),
+      }));
+  } catch (error) {
+    console.warn("Skipping archived forum posts sync:", error);
+    return [];
+  }
 }
 
 async function getActivePosts(bot: DiscordBot): Promise<ForumPostRecord[]> {
-  const active = await bot.helpers.getActiveThreads(config.guildId);
+  const channels = (await bot.helpers.getChannels(
+    config.guildId,
+  )) as ForumChannelLike[];
 
-  return (active.threads as ForumChannelLike[])
+  return channels
     .filter(isTrackedForumPost)
     .map((channel) => ({
       id: toBigInt(channel.id),
