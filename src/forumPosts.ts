@@ -51,54 +51,20 @@ function getRoleName(postName: string): string {
   return `${safeName}${config.roleSuffix}`;
 }
 
-async function getArchivedPosts(bot: DiscordBot): Promise<ForumPostRecord[]> {
-  try {
-    const archived = await bot.helpers.getPublicArchivedThreads(
-      config.forumChannelId,
-    );
-
-    return (archived.threads as ForumChannelLike[])
-      .filter(isTrackedForumPost)
-      .map((channel) => ({
-        id: toBigInt(channel.id),
-        name: channel.name,
-        starterMessageId: toBigInt(channel.messageId),
-      }));
-  } catch (error) {
-    console.warn("Skipping archived forum posts sync:", error);
-    return [];
-  }
-}
-
-async function getActivePosts(bot: DiscordBot): Promise<ForumPostRecord[]> {
-  const channels = (await bot.helpers.getChannels(
-    config.guildId,
-  )) as ForumChannelLike[];
-
-  return channels
-    .filter(isTrackedForumPost)
-    .map((channel) => ({
-      id: toBigInt(channel.id),
-      name: channel.name,
-      starterMessageId: toBigInt(channel.messageId),
-    }));
-}
-
 export async function getTrackedForumPosts(
-  bot: DiscordBot,
+  _bot: DiscordBot,
 ): Promise<ForumPostRecord[]> {
-  const combined = [...(await getActivePosts(bot)), ...(await getArchivedPosts(bot))];
-  const deduped = new Map<bigint, ForumPostRecord>();
-
-  for (const post of combined) {
-    if (deduped.has(post.id) === false) {
-      deduped.set(post.id, post);
-    }
-  }
-
-  return [...deduped.values()].sort((left, right) =>
+  return config.trackedPosts
+    .map((post) => ({
+      id: post.id,
+      name: post.name,
+      // Forum starter messages use the post starter message; for these static
+      // posts we treat the supplied post ID as the starter message ID too.
+      starterMessageId: post.id,
+    }))
+    .sort((left, right) =>
     left.name.localeCompare(right.name),
-  );
+    );
 }
 
 export async function getTrackedForumPostById(

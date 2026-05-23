@@ -15,6 +15,24 @@ export const config = {
   maxAutocompleteResults: 25,
   roleSuffix: " PING",
   maxRoleNameLength: 100,
+  trackedPosts: [
+    {
+      id: 1507752111495053374n,
+      name: "PEAK",
+    },
+    {
+      id: 1507752025008508958n,
+      name: "R.E.P.O",
+    },
+    {
+      id: 1507751920763277393n,
+      name: "Burglin' Gnomes",
+    },
+    {
+      id: 1507751743931547738n,
+      name: "Lethal Company",
+    },
+  ],
 } as const;
 
 export function formatCooldown(msRemaining: number): string {
