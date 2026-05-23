@@ -1,17 +1,16 @@
 {
   "name": "friendslopper",
-  "module": "index.ts",
   "type": "module",
   "private": true,
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/node": "^24.10.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
   },
   "scripts": {
-    "dev": "bun --watch src src/index.ts",
-    "start": "bun run src/index.ts"
-  },
-  "peerDependencies": {
-    "typescript": "^5"
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "discordeno": "^21.0.0"
