@@ -47,6 +47,11 @@ type InteractionMessage = {
   content: string;
 };
 
+type ChannelMessage = {
+  content?: string;
+  timestamp?: number | string;
+};
+
 type RawGatewayPayload = {
   t?: string;
   d?: Record<string, unknown>;
@@ -141,6 +146,49 @@ function wasPostPingedRecently(postId: bigint): boolean {
 
 function markPostPinged(postId: bigint): void {
   recentPostPings.set(postId, Date.now());
+}
+
+function getMessageTimestampMs(message: ChannelMessage): number {
+  if (typeof message.timestamp === "number") {
+    return message.timestamp;
+  }
+
+  if (typeof message.timestamp === "string") {
+    const parsedTimestamp = Date.parse(message.timestamp);
+    if (Number.isNaN(parsedTimestamp) === false) {
+      return parsedTimestamp;
+    }
+  }
+
+  return 0;
+}
+
+async function hasRecentMatchingPing(
+  postId: bigint,
+  expectedContent: string,
+): Promise<boolean> {
+  try {
+    const recentMessages = (await bot.helpers.getMessages(postId, {
+      limit: 10,
+    })) as ChannelMessage[];
+
+    const now = Date.now();
+
+    for (const message of recentMessages) {
+      if (message.content !== expectedContent) {
+        continue;
+      }
+
+      const messageTimestampMs = getMessageTimestampMs(message);
+      if (messageTimestampMs > 0 && now - messageTimestampMs <= 60_000) {
+        return true;
+      }
+    }
+  } catch (error) {
+    console.warn("Failed to check recent messages for duplicate ping:", error);
+  }
+
+  return false;
 }
 
 async function safelyRespond(
@@ -454,9 +502,19 @@ const bot = createBot({
           await delay(3_000);
 
           const role = await ensurePostRole(bot, post);
+          const pingContent = `${post.pingEmoji} <@&${role.id}> Heads up for ${post.name}.`;
+
+          if (await hasRecentMatchingPing(post.id, pingContent)) {
+            markPostPinged(post.id);
+            await safelyEditResponse(
+              interaction,
+              `${config.checkmarkEmoji} Ping for ${post.name} was already sent.`,
+            );
+            return;
+          }
 
           await bot.helpers.sendMessage(post.id, {
-            content: `${post.pingEmoji} <@&${role.id}> Heads up for ${post.name}.`,
+            content: pingContent,
           });
           markPostPinged(post.id);
 

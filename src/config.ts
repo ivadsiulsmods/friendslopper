@@ -42,6 +42,10 @@ export const config = {
       starterMessageId: 1507751743931547738n,
     },
   ],
+  allPingsPost: {
+    id: 1507786996221870191n,
+    starterMessageId: 1507786996221870191n,
+  },
   loadingEmoji: "<a:loading:1508529946493059215>",
   checkmarkEmoji: "<:checkmark:1508530274588299447>",
   errorEmoji: "<:error:1508536298896359555>",

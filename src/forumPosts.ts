@@ -95,6 +95,123 @@ async function getRoleByName(
   return null;
 }
 
+function isAllPingsPost(channelId: bigint, messageId: bigint): boolean {
+  return (
+    channelId === config.allPingsPost.id &&
+    messageId === config.allPingsPost.starterMessageId
+  );
+}
+
+async function ensureAllPostRoles(bot: DiscordBot): Promise<RoleLike[]> {
+  const posts = await getTrackedForumPosts(bot);
+  const roles: RoleLike[] = [];
+
+  for (const post of posts) {
+    roles.push(await ensurePostRole(bot, post));
+  }
+
+  return roles;
+}
+
+async function addAllPostRolesToMember(
+  bot: DiscordBot,
+  userId: bigint,
+): Promise<void> {
+  const roles = await ensureAllPostRoles(bot);
+  const member = (await bot.helpers.getMember(
+    config.guildId,
+    userId,
+  )) as GuildMemberLike;
+
+  for (const role of roles) {
+    if (member.roles.includes(role.id) === true) {
+      continue;
+    }
+
+    await bot.helpers.addRole(config.guildId, userId, role.id);
+  }
+}
+
+async function removeAllPostRolesFromMember(
+  bot: DiscordBot,
+  userId: bigint,
+): Promise<void> {
+  const roles = await ensureAllPostRoles(bot);
+  const member = (await bot.helpers.getMember(
+    config.guildId,
+    userId,
+  )) as GuildMemberLike;
+
+  for (const role of roles) {
+    if (member.roles.includes(role.id) === false) {
+      continue;
+    }
+
+    await bot.helpers.removeRole(config.guildId, userId, role.id);
+  }
+}
+
+async function getAllPingsReactedUserIds(bot: DiscordBot): Promise<Set<bigint>> {
+  const reactedUserIds = new Set<bigint>();
+  let after: string | undefined;
+
+  while (true) {
+    const users = (await bot.helpers.getReactions(
+      config.allPingsPost.id,
+      config.allPingsPost.starterMessageId,
+      config.reactionEmoji,
+      {
+        after,
+        limit: 100,
+        type: 0,
+      },
+    )) as Array<{ id: bigint; bot?: boolean }>;
+
+    if (users.length === 0) {
+      break;
+    }
+
+    for (const user of users) {
+      if (user.bot === true) {
+        continue;
+      }
+
+      reactedUserIds.add(user.id);
+    }
+
+    if (users.length < 100) {
+      break;
+    }
+
+    after = users[users.length - 1]!.id.toString();
+  }
+
+  return reactedUserIds;
+}
+
+async function syncAllPingsMembers(bot: DiscordBot): Promise<void> {
+  const reactedUserIds = await getAllPingsReactedUserIds(bot);
+  const roles = await ensureAllPostRoles(bot);
+  const members = await getAllGuildMembers(bot);
+
+  for (const member of members) {
+    const shouldHaveAllRoles = reactedUserIds.has(member.id);
+
+    for (const role of roles) {
+      const hasRole = member.roles.includes(role.id);
+
+      if (shouldHaveAllRoles === true && hasRole === false) {
+        await bot.helpers.addRole(config.guildId, member.id, role.id);
+        continue;
+      }
+
+      if (shouldHaveAllRoles === false && hasRole === true) {
+        await bot.helpers.removeRole(config.guildId, member.id, role.id);
+      }
+    }
+  }
+}
+
 export async function ensurePostRole(
   bot: DiscordBot,
   post: ForumPostRecord,
@@ -235,6 +352,12 @@ export async function syncAllPostRoles(bot: DiscordBot): Promise<void> {
       console.warn(`Skipping startup reaction sync for ${post.name}:`, error);
     }
   }
+
+  try {
+    await syncAllPingsMembers(bot);
+  } catch (error) {
+    console.warn("Skipping startup reaction sync for all pings:", error);
+  }
 }
 
 export async function syncPostRoleForMessage(
@@ -242,6 +365,11 @@ export async function syncPostRoleForMessage(
   channelId: bigint,
   messageId: bigint,
 ): Promise<void> {
+  if (isAllPingsPost(channelId, messageId) === true) {
+    await syncAllPingsMembers(bot);
+    return;
+  }
+
   const post = await getTrackedForumPostById(bot, channelId);
 
   if (post === null) {
@@ -261,6 +389,11 @@ export async function addRoleForReaction(
   messageId: bigint,
   userId: bigint,
 ): Promise<void> {
+  if (isAllPingsPost(channelId, messageId) === true) {
+    await addAllPostRolesToMember(bot, userId);
+    return;
+  }
+
   const post = await getTrackedForumPostById(bot, channelId);
 
   if (post === null || post.starterMessageId !== messageId) {
@@ -284,6 +417,11 @@ export async function removeRoleForReaction(
   messageId: bigint,
   userId: bigint,
 ): Promise<void> {
+  if (isAllPingsPost(channelId, messageId) === true) {
+    await removeAllPostRolesFromMember(bot, userId);
+    return;
+  }
+
   const post = await getTrackedForumPostById(bot, channelId);
 
   if (post === null || post.starterMessageId !== messageId) {
