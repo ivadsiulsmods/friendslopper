@@ -47,6 +47,10 @@ type CommandInteraction = {
   ) => Promise<unknown>;
 };
 
+type InteractionMessage = {
+  content: string;
+};
+
 type RawGatewayPayload = {
   t?: string;
   d?: Record<string, unknown>;
@@ -136,7 +140,11 @@ async function safelyRespond(
   content: string,
 ): Promise<void> {
   try {
-    await interaction.respond(content, {
+    const message: InteractionMessage = {
+      content,
+    };
+
+    await interaction.respond(message, {
       isPrivate: true,
     });
   } catch (error) {
@@ -149,7 +157,11 @@ async function safelyEditResponse(
   content: string,
 ): Promise<void> {
   try {
-    await interaction.edit(content);
+    const message: InteractionMessage = {
+      content,
+    };
+
+    await interaction.edit(message);
   } catch (error) {
     console.error("Failed to edit interaction response:", error);
   }
@@ -416,6 +428,8 @@ const bot = createBot({
         activeNotifyKeys.add(activeNotifyKey);
 
         try {
+          markInteractionProcessed(interaction.id);
+
           if (userBypassesCooldown(interaction) === false) {
             setCooldown(userId);
           }
@@ -437,9 +451,9 @@ const bot = createBot({
             interaction,
             `${config.checkmarkEmoji} Sent ping for ${post.name}!`,
           );
-
-          markInteractionProcessed(interaction.id);
         } catch (error) {
+          processedNotifyInteractions.delete(interaction.id);
+
           if (userBypassesCooldown(interaction) === false) {
             notifyCooldowns.delete(userId);
           }
