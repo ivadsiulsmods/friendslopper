@@ -155,6 +155,12 @@ async function safelyEditResponse(
   }
 }
 
+async function delay(ms: number): Promise<void> {
+  await new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
 function getBigIntField(
   payload: Record<string, unknown>,
   key: string,
@@ -414,15 +420,23 @@ const bot = createBot({
             setCooldown(userId);
           }
 
-          await safelyRespond(interaction, `:loading: Sending ping for ${post.name}...`);
+          await safelyRespond(
+            interaction,
+            `${config.loadingEmoji} Sending ping for ${post.name}...`,
+          );
+
+          await delay(3_000);
 
           const role = await ensurePostRole(bot, post);
 
           await bot.helpers.sendMessage(post.id, {
-            content: `<@&${role.id}> Heads up for ${post.name}.`,
+            content: `${post.pingEmoji} <@&${role.id}> Heads up for ${post.name}.`,
           });
 
-          await safelyEditResponse(interaction, `:checkmark: Sent ping for ${post.name}!`);
+          await safelyEditResponse(
+            interaction,
+            `${config.checkmarkEmoji} Sent ping for ${post.name}!`,
+          );
 
           markInteractionProcessed(interaction.id);
         } catch (error) {

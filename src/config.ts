@@ -20,24 +20,30 @@ export const config = {
     {
       id: 1507752111495053374n,
       name: "PEAK",
+      pingEmoji: "<:peak:1508531200338296933>",
       starterMessageId: 1507752111495053374n,
     },
     {
       id: 1507752025008508958n,
       name: "R.E.P.O",
+      pingEmoji: "<:repo:1508531664270266460>",
       starterMessageId: 1507752025008508958n,
     },
     {
       id: 1507751920763277393n,
       name: "Burglin' Gnomes",
+      pingEmoji: "<:gnomes:1508531516496547850>",
       starterMessageId: 1507751920763277393n,
     },
     {
       id: 1507751743931547738n,
       name: "Lethal Company",
+      pingEmoji: "<:lethal:1508531782629331024>",
       starterMessageId: 1507751743931547738n,
     },
   ],
+  loadingEmoji: "<a:loading:1508529946493059215>",
+  checkmarkEmoji: "<:checkmark:1508530274588299447>",
 } as const;
 
 export function formatCooldown(msRemaining: number): string {

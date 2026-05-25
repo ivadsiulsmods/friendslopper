@@ -4,6 +4,7 @@ import { config } from "./config.js";
 export interface ForumPostRecord {
   id: bigint;
   name: string;
+  pingEmoji: string;
   starterMessageId: bigint;
 }
 
@@ -40,6 +41,7 @@ export async function getTrackedForumPosts(
     .map((post) => ({
       id: post.id,
       name: post.name,
+      pingEmoji: post.pingEmoji,
       starterMessageId: post.starterMessageId,
     }))
     .sort((left, right) =>
