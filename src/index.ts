@@ -10,11 +10,8 @@ import { config, formatCooldown } from "./config.js";
 import {
   addRoleForReaction,
   ensurePostRole,
-  getAutocompleteMatches,
   getTrackedForumPostByName,
-  getTrackedForumPosts,
   removeRoleForReaction,
-  shouldProcessReactionPayload,
   syncAllPostRoles,
   syncPostRoleForMessage,
 } from "./forumPosts.js";
@@ -65,18 +62,6 @@ function getOptionValue(
   }
 
   return undefined;
-}
-
-function getFocusedOptionValue(interaction: CommandInteraction): string {
-  const options = interaction.data?.options ?? [];
-
-  for (const option of options) {
-    if (option.focused === true && typeof option.value === "string") {
-      return option.value;
-    }
-  }
-
-  return "";
 }
 
 function userCanNotify(interaction: CommandInteraction): boolean {
@@ -165,28 +150,39 @@ const notifyCommand = {
       type: ApplicationCommandOptionTypes.String,
       name: "game",
       description: "The forum post to notify.",
-      autocomplete: true,
+      choices: config.trackedPosts.map((post) => ({
+        name: post.name,
+        value: post.name,
+      })),
       required: true,
     },
   ],
 };
+const rawPort = process.env.PORT;
+const shouldStartHttpServer = rawPort !== undefined && rawPort.length > 0;
+const port = shouldStartHttpServer
+  ? Number.parseInt(rawPort, 10)
+  : undefined;
 
-const port = Number.parseInt(process.env.PORT ?? "3000", 10);
-
-if (Number.isNaN(port) === true || port <= 0) {
+if (shouldStartHttpServer === true && (port === undefined || Number.isNaN(port) === true || port <= 0)) {
   throw new Error("PORT must be a valid positive number.");
 }
 
-const server = createServer((request, response) => {
-  if (request.url === "/health") {
-    response.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
-    response.end("OK");
-    return;
-  }
+const server = shouldStartHttpServer
+  ? createServer((request, response) => {
+    if (request.url === "/" || request.url === "/health") {
+      response.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+      response.end(JSON.stringify({
+        ok: true,
+        uptimeSeconds: Math.floor(process.uptime()),
+      }));
+      return;
+    }
 
-  response.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
-  response.end("Not Found");
-});
+    response.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+    response.end("Not Found");
+  })
+  : null;
 
 const bot = createBot({
   token: config.token,
@@ -306,19 +302,6 @@ const bot = createBot({
           return;
         }
 
-        if (interaction.type === InteractionTypes.ApplicationCommandAutocomplete) {
-          const posts = await getTrackedForumPosts(bot);
-          const matches = getAutocompleteMatches(
-            posts,
-            getFocusedOptionValue(interaction),
-          );
-
-          await interaction.respond({
-            choices: matches,
-          });
-          return;
-        }
-
         if (interaction.type !== InteractionTypes.ApplicationCommand) {
           return;
         }
@@ -413,16 +396,18 @@ async function shutdown(signal: string): Promise<void> {
   forceExitTimeout.unref();
 
   try {
-    await new Promise<void>((resolve, reject) => {
-      server.close((error) => {
-        if (error !== undefined) {
-          reject(error);
-          return;
-        }
+    if (server !== null) {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error !== undefined) {
+            reject(error);
+            return;
+          }
 
-        resolve();
+          resolve();
+        });
       });
-    });
+    }
 
     await Promise.resolve(bot.shutdown?.());
     process.exit(0);
@@ -432,7 +417,7 @@ async function shutdown(signal: string): Promise<void> {
   }
 }
 
-server.on("error", (error) => {
+server?.on("error", (error) => {
   console.error("HTTP server failed:", error);
   process.exit(1);
 });
@@ -445,8 +430,10 @@ process.on("SIGTERM", () => {
   void shutdown("SIGTERM");
 });
 
-server.listen(port, "0.0.0.0", () => {
-  console.log(`Health server listening on 0.0.0.0:${port}`);
-});
+if (server !== null && port !== undefined) {
+  server.listen(port, "0.0.0.0", () => {
+    console.log(`Health server listening on 0.0.0.0:${port}`);
+  });
+}
 
 bot.start();

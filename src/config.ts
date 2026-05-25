@@ -12,7 +12,7 @@ export const config = {
   notifierRoleId: 1501620031421939814n,
   adminRoleId: 1331447283904024596n,
   notifyCooldownMs: 5 * 60 * 1000,
-  reactionEmoji: "🎮",
+  reactionEmoji: "\u{1F3AE}",
   maxAutocompleteResults: 25,
   roleSuffix: " PING",
   maxRoleNameLength: 100,
