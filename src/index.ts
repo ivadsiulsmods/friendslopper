@@ -503,6 +503,7 @@ const bot = createBot({
 
           const role = await ensurePostRole(bot, post);
           const pingContent = `${post.pingEmoji} <@&${role.id}> Heads up for ${post.name}.`;
+          const pingNonce = `notify:${interaction.id.toString()}`;
 
           if (await hasRecentMatchingPing(post.id, pingContent)) {
             markPostPinged(post.id);
@@ -515,6 +516,8 @@ const bot = createBot({
 
           await bot.helpers.sendMessage(post.id, {
             content: pingContent,
+            nonce: pingNonce,
+            enforceNonce: true,
           });
           markPostPinged(post.id);
 
