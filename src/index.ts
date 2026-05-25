@@ -40,6 +40,11 @@ type CommandInteraction = {
     response: string | Record<string, unknown>,
     options?: { isPrivate?: boolean; withResponse?: boolean },
   ) => Promise<unknown>;
+  edit: (
+    response: string | Record<string, unknown>,
+    messageId?: bigint | string,
+    options?: Record<string, unknown>,
+  ) => Promise<unknown>;
 };
 
 type RawGatewayPayload = {
@@ -136,6 +141,17 @@ async function safelyRespond(
     });
   } catch (error) {
     console.error("Failed to respond to interaction:", error);
+  }
+}
+
+async function safelyEditResponse(
+  interaction: CommandInteraction,
+  content: string,
+): Promise<void> {
+  try {
+    await interaction.edit(content);
+  } catch (error) {
+    console.error("Failed to edit interaction response:", error);
   }
 }
 
@@ -398,13 +414,15 @@ const bot = createBot({
             setCooldown(userId);
           }
 
-          await safelyRespond(interaction, `Sending ping for ${post.name}...`);
+          await safelyRespond(interaction, `:loading: Sending ping for ${post.name}...`);
 
           const role = await ensurePostRole(bot, post);
 
           await bot.helpers.sendMessage(post.id, {
             content: `<@&${role.id}> Heads up for ${post.name}.`,
           });
+
+          await safelyEditResponse(interaction, `:checkmark: Sent ping for ${post.name}!`);
 
           markInteractionProcessed(interaction.id);
         } catch (error) {
