@@ -10,7 +10,7 @@ import { config, formatCooldown } from "./config.js";
 import {
   addRoleForReaction,
   ensurePostRole,
-  getTrackedForumPostByName,
+  getTrackedForumPostById,
   removeRoleForReaction,
   syncAllPostRoles,
   syncPostRoleForMessage,
@@ -20,14 +20,10 @@ type CommandInteraction = {
   id: bigint;
   token: string;
   type: number;
+  channelId?: bigint;
   guildId?: bigint;
   data?: {
     name?: string;
-    options?: Array<{
-      name: string;
-      value?: string | number | boolean;
-      focused?: boolean;
-    }>;
   };
   member?: {
     id?: bigint;
@@ -59,6 +55,8 @@ type RawGatewayPayload = {
 const notifyCooldowns = new Map<bigint, number>();
 const processedNotifyInteractions = new Map<bigint, number>();
 const activeNotifyKeys = new Set<string>();
+const recentPostPings = new Map<bigint, number>();
+const postPingDedupMs = 15_000;
 
 function cleanupProcessedInteractions(): void {
   const now = Date.now();
@@ -79,23 +77,8 @@ function hasProcessedInteraction(interactionId: bigint): boolean {
   return processedNotifyInteractions.has(interactionId);
 }
 
-function getActiveNotifyKey(userId: bigint, postId: bigint): string {
-  return `${userId}:${postId}`;
-}
-
-function getOptionValue(
-  interaction: CommandInteraction,
-  optionName: string,
-): string | number | boolean | undefined {
-  const options = interaction.data?.options ?? [];
-
-  for (const option of options) {
-    if (option.name === optionName) {
-      return option.value;
-    }
-  }
-
-  return undefined;
+function getActiveNotifyKey(postId: bigint): string {
+  return `${postId}`;
 }
 
 function userCanNotify(interaction: CommandInteraction): boolean {
@@ -133,6 +116,31 @@ function cleanupCooldown(userId: bigint): void {
   if (remaining === 0) {
     notifyCooldowns.delete(userId);
   }
+}
+
+function cleanupRecentPostPings(): void {
+  const now = Date.now();
+
+  for (const [postId, lastPingAt] of recentPostPings) {
+    if (now - lastPingAt >= postPingDedupMs) {
+      recentPostPings.delete(postId);
+    }
+  }
+}
+
+function wasPostPingedRecently(postId: bigint): boolean {
+  cleanupRecentPostPings();
+  const lastPingAt = recentPostPings.get(postId);
+
+  if (lastPingAt === undefined) {
+    return false;
+  }
+
+  return Date.now() - lastPingAt < postPingDedupMs;
+}
+
+function markPostPinged(postId: bigint): void {
+  recentPostPings.set(postId, Date.now());
 }
 
 async function safelyRespond(
@@ -203,19 +211,7 @@ function getEmojiNameField(payload: Record<string, unknown>): string | undefined
 
 const notifyCommand = {
   name: "notify",
-  description: "Ping the opt-in role for a forum game post.",
-  options: [
-    {
-      type: ApplicationCommandOptionTypes.String,
-      name: "game",
-      description: "The forum post to notify.",
-      choices: config.trackedPosts.map((post) => ({
-        name: post.name,
-        value: post.name,
-      })),
-      required: true,
-    },
-  ],
+  description: "Ping the opt-in role for the current forum thread.",
 };
 const rawPort = process.env.PORT;
 const shouldStartHttpServer = rawPort !== undefined && rawPort.length > 0;
@@ -261,6 +257,7 @@ const bot = createBot({
       id: true,
       token: true,
       type: true,
+      channelId: true,
       guildId: true,
       data: true,
       member: true,
@@ -397,17 +394,16 @@ const bot = createBot({
           }
         }
 
-        const gameOption = getOptionValue(interaction, "game");
-        if (typeof gameOption !== "string" || gameOption.trim().length === 0) {
-          await safelyRespond(interaction, "Pick a game post first.");
+        if (interaction.channelId === undefined) {
+          await safelyRespond(interaction, "I couldn't figure out which thread this was run in.");
           return;
         }
 
-        const post = await getTrackedForumPostByName(bot, gameOption);
+        const post = await getTrackedForumPostById(bot, interaction.channelId);
         if (post === null) {
           await safelyRespond(
             interaction,
-            "I couldn't find that forum post. Use the autocomplete suggestions.",
+            "This command only works inside one of the tracked game threads.",
           );
           return;
         }
@@ -416,7 +412,15 @@ const bot = createBot({
           return;
         }
 
-        const activeNotifyKey = getActiveNotifyKey(userId, post.id);
+        if (wasPostPingedRecently(post.id) === true) {
+          await safelyRespond(
+            interaction,
+            `A ping for ${post.name} was already sent very recently.`,
+          );
+          return;
+        }
+
+        const activeNotifyKey = getActiveNotifyKey(post.id);
         if (activeNotifyKeys.has(activeNotifyKey) === true) {
           await safelyRespond(
             interaction,
@@ -446,6 +450,7 @@ const bot = createBot({
           await bot.helpers.sendMessage(post.id, {
             content: `${post.pingEmoji} <@&${role.id}> Heads up for ${post.name}.`,
           });
+          markPostPinged(post.id);
 
           await safelyEditResponse(
             interaction,
