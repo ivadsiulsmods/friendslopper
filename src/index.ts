@@ -400,6 +400,17 @@ const bot = createBot({
 
     async interactionCreate(rawInteraction) {
       const interaction = rawInteraction as unknown as CommandInteraction;
+      let hasAcknowledgedInteraction = false;
+
+      async function respondInHandler(content: string): Promise<void> {
+        hasAcknowledgedInteraction = true;
+        await safelyRespond(interaction, content);
+      }
+
+      async function editInHandler(content: string): Promise<void> {
+        hasAcknowledgedInteraction = true;
+        await safelyEditResponse(interaction, content);
+      }
 
       try {
         if (interaction.data?.name !== "notify") {
@@ -411,19 +422,18 @@ const bot = createBot({
         }
 
         if (interaction.guildId !== config.guildId) {
-          await safelyRespond(interaction, "This command only works in the target guild.");
+          await respondInHandler("This command only works in the target guild.");
           return;
         }
 
         const userId = getInteractionUserId(interaction);
         if (userId === undefined) {
-          await safelyRespond(interaction, "I couldn't figure out who ran that command.");
+          await respondInHandler("I couldn't figure out who ran that command.");
           return;
         }
 
         if (userCanNotify(interaction) === false) {
-          await safelyRespond(
-            interaction,
+          await respondInHandler(
             "You need the configured notifier role to use `/notify`.",
           );
           return;
@@ -434,22 +444,19 @@ const bot = createBot({
 
           const remainingCooldown = getCooldownRemaining(userId);
           if (remainingCooldown > 0) {
-            await safelyRespond(
-              interaction,
+            await respondInHandler(
               `You're on cooldown for another ${formatCooldown(remainingCooldown)}.`,
             );
             return;
           }
         }
 
-        await safelyRespond(
-          interaction,
+        await respondInHandler(
           `${config.loadingEmoji} Figuring out this thread...`,
         );
 
         if (interaction.channelId === undefined) {
-          await safelyEditResponse(
-            interaction,
+          await editInHandler(
             `${config.errorEmoji} Wrong thread/channel.`,
           );
           return;
@@ -457,8 +464,7 @@ const bot = createBot({
 
         const post = await getTrackedForumPostById(bot, interaction.channelId);
         if (post === null) {
-          await safelyEditResponse(
-            interaction,
+          await editInHandler(
             `${config.errorEmoji} Wrong thread/channel.`,
           );
           return;
@@ -469,8 +475,7 @@ const bot = createBot({
         }
 
         if (wasPostPingedRecently(post.id) === true) {
-          await safelyEditResponse(
-            interaction,
+          await editInHandler(
             `A ping for ${post.name} was already sent very recently.`,
           );
           return;
@@ -478,8 +483,7 @@ const bot = createBot({
 
         const activeNotifyKey = getActiveNotifyKey(post.id);
         if (activeNotifyKeys.has(activeNotifyKey) === true) {
-          await safelyEditResponse(
-            interaction,
+          await editInHandler(
             `A ping for ${post.name} is already being sent.`,
           );
           return;
@@ -494,8 +498,7 @@ const bot = createBot({
             setCooldown(userId);
           }
 
-          await safelyEditResponse(
-            interaction,
+          await editInHandler(
             `${config.loadingEmoji} Sending ping for ${post.name}...`,
           );
 
@@ -507,8 +510,7 @@ const bot = createBot({
 
           if (await hasRecentMatchingPing(post.id, pingContent)) {
             markPostPinged(post.id);
-            await safelyEditResponse(
-              interaction,
+            await editInHandler(
               `${config.checkmarkEmoji} Ping for ${post.name} was already sent.`,
             );
             return;
@@ -521,8 +523,7 @@ const bot = createBot({
           });
           markPostPinged(post.id);
 
-          await safelyEditResponse(
-            interaction,
+          await editInHandler(
             `${config.checkmarkEmoji} Sent ping for ${post.name}!`,
           );
         } catch (error) {
@@ -539,11 +540,11 @@ const bot = createBot({
       } catch (error) {
         console.error("interactionCreate failed:", error);
 
-        if (interaction.type === InteractionTypes.ApplicationCommand) {
-          await safelyRespond(
-            interaction,
-            "Something went wrong while handling `/notify`.",
-          );
+        if (
+          interaction.type === InteractionTypes.ApplicationCommand &&
+          hasAcknowledgedInteraction === false
+        ) {
+          await respondInHandler("Something went wrong while handling `/notify`.");
         }
       }
     },
