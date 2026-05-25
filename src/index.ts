@@ -48,6 +48,31 @@ type RawGatewayPayload = {
 };
 
 const notifyCooldowns = new Map<bigint, number>();
+const processedNotifyInteractions = new Map<bigint, number>();
+const activeNotifyKeys = new Set<string>();
+
+function cleanupProcessedInteractions(): void {
+  const now = Date.now();
+
+  for (const [interactionId, processedAt] of processedNotifyInteractions) {
+    if (now - processedAt >= 15 * 60 * 1000) {
+      processedNotifyInteractions.delete(interactionId);
+    }
+  }
+}
+
+function markInteractionProcessed(interactionId: bigint): void {
+  processedNotifyInteractions.set(interactionId, Date.now());
+}
+
+function hasProcessedInteraction(interactionId: bigint): boolean {
+  cleanupProcessedInteractions();
+  return processedNotifyInteractions.has(interactionId);
+}
+
+function getActiveNotifyKey(userId: bigint, postId: bigint): string {
+  return `${userId}:${postId}`;
+}
 
 function getOptionValue(
   interaction: CommandInteraction,
@@ -353,16 +378,43 @@ const bot = createBot({
           return;
         }
 
-        await safelyRespond(interaction, `Sending ping for ${post.name}...`);
+        if (hasProcessedInteraction(interaction.id) === true) {
+          return;
+        }
 
-        const role = await ensurePostRole(bot, post);
+        const activeNotifyKey = getActiveNotifyKey(userId, post.id);
+        if (activeNotifyKeys.has(activeNotifyKey) === true) {
+          await safelyRespond(
+            interaction,
+            `A ping for ${post.name} is already being sent.`,
+          );
+          return;
+        }
 
-        await bot.helpers.sendMessage(post.id, {
-          content: `<@&${role.id}> Heads up for ${post.name}.`,
-        });
+        activeNotifyKeys.add(activeNotifyKey);
 
-        if (userBypassesCooldown(interaction) === false) {
-          setCooldown(userId);
+        try {
+          if (userBypassesCooldown(interaction) === false) {
+            setCooldown(userId);
+          }
+
+          await safelyRespond(interaction, `Sending ping for ${post.name}...`);
+
+          const role = await ensurePostRole(bot, post);
+
+          await bot.helpers.sendMessage(post.id, {
+            content: `<@&${role.id}> Heads up for ${post.name}.`,
+          });
+
+          markInteractionProcessed(interaction.id);
+        } catch (error) {
+          if (userBypassesCooldown(interaction) === false) {
+            notifyCooldowns.delete(userId);
+          }
+
+          throw error;
+        } finally {
+          activeNotifyKeys.delete(activeNotifyKey);
         }
       } catch (error) {
         console.error("interactionCreate failed:", error);
