@@ -421,19 +421,23 @@ const bot = createBot({
           return;
         }
 
+        await respondInHandler(
+          `${config.loadingEmoji} Figuring out this thread...`,
+        );
+
         if (interaction.guildId !== config.guildId) {
-          await respondInHandler("This command only works in the target guild.");
+          await editInHandler("This command only works in the target guild.");
           return;
         }
 
         const userId = getInteractionUserId(interaction);
         if (userId === undefined) {
-          await respondInHandler("I couldn't figure out who ran that command.");
+          await editInHandler("I couldn't figure out who ran that command.");
           return;
         }
 
         if (userCanNotify(interaction) === false) {
-          await respondInHandler(
+          await editInHandler(
             "You need the configured notifier role to use `/notify`.",
           );
           return;
@@ -444,16 +448,12 @@ const bot = createBot({
 
           const remainingCooldown = getCooldownRemaining(userId);
           if (remainingCooldown > 0) {
-            await respondInHandler(
+            await editInHandler(
               `You're on cooldown for another ${formatCooldown(remainingCooldown)}.`,
             );
             return;
           }
         }
-
-        await respondInHandler(
-          `${config.loadingEmoji} Figuring out this thread...`,
-        );
 
         if (interaction.channelId === undefined) {
           await editInHandler(
@@ -506,7 +506,7 @@ const bot = createBot({
 
           const role = await ensurePostRole(bot, post);
           const pingContent = `${post.pingEmoji} <@&${role.id}> Heads up for ${post.name}.`;
-          const pingNonce = `notify:${interaction.id.toString()}`;
+          const pingNonce = interaction.id.toString();
 
           if (await hasRecentMatchingPing(post.id, pingContent)) {
             markPostPinged(post.id);
