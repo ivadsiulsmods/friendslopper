@@ -394,16 +394,24 @@ const bot = createBot({
           }
         }
 
+        await safelyRespond(
+          interaction,
+          `${config.loadingEmoji} Figuring out this thread...`,
+        );
+
         if (interaction.channelId === undefined) {
-          await safelyRespond(interaction, "I couldn't figure out which thread this was run in.");
+          await safelyEditResponse(
+            interaction,
+            `${config.errorEmoji} Wrong thread/channel.`,
+          );
           return;
         }
 
         const post = await getTrackedForumPostById(bot, interaction.channelId);
         if (post === null) {
-          await safelyRespond(
+          await safelyEditResponse(
             interaction,
-            "This command only works inside one of the tracked game threads.",
+            `${config.errorEmoji} Wrong thread/channel.`,
           );
           return;
         }
@@ -413,7 +421,7 @@ const bot = createBot({
         }
 
         if (wasPostPingedRecently(post.id) === true) {
-          await safelyRespond(
+          await safelyEditResponse(
             interaction,
             `A ping for ${post.name} was already sent very recently.`,
           );
@@ -422,7 +430,7 @@ const bot = createBot({
 
         const activeNotifyKey = getActiveNotifyKey(post.id);
         if (activeNotifyKeys.has(activeNotifyKey) === true) {
-          await safelyRespond(
+          await safelyEditResponse(
             interaction,
             `A ping for ${post.name} is already being sent.`,
           );
@@ -438,7 +446,7 @@ const bot = createBot({
             setCooldown(userId);
           }
 
-          await safelyRespond(
+          await safelyEditResponse(
             interaction,
             `${config.loadingEmoji} Sending ping for ${post.name}...`,
           );

@@ -44,6 +44,7 @@ export const config = {
   ],
   loadingEmoji: "<a:loading:1508529946493059215>",
   checkmarkEmoji: "<:checkmark:1508530274588299447>",
+  errorEmoji: "<:error:1508536298896359555>",
 } as const;
 
 export function formatCooldown(msRemaining: number): string {
